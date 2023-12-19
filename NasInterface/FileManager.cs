@@ -106,7 +106,7 @@ namespace NasInterface
                 //throw new Exception(ex.Message);
             }
         }
-        public async Task<bool> Download(string ipAddress, string port, string path)
+        public async Task<string> DownloadAndReturnPath(string ipAddress, string port, string path, string downloadPath)
         {
             try
             {
@@ -116,18 +116,6 @@ namespace NasInterface
 
                     if (response.IsSuccessStatusCode)
                     {
-                        string downloadPath;
-                        using (var folderDialog = new FolderBrowserDialog())
-                        {
-                            DialogResult result = folderDialog.ShowDialog();
-                            if (result != DialogResult.OK || string.IsNullOrWhiteSpace(folderDialog.SelectedPath))
-                            {
-                                MessageBox.Show("No folder selected.");
-                                return false;
-                            }
-                            downloadPath = folderDialog.SelectedPath;
-                        }
-
                         string suggestedFileName = response.Content.Headers.ContentDisposition.FileNameStar;
                         if (string.IsNullOrEmpty(suggestedFileName))
                         {
@@ -136,8 +124,7 @@ namespace NasInterface
 
                         if (string.IsNullOrEmpty(suggestedFileName))
                         {
-                            MessageBox.Show("The server did not provide a file name.");
-                            return false;
+                            throw new Exception("The server did not provide a file name.");
                         }
 
                         using (FileStream fileStream = File.Create(Path.Combine(downloadPath, suggestedFileName)))
@@ -145,20 +132,17 @@ namespace NasInterface
                             await response.Content.CopyToAsync(fileStream);
                         }
 
-                        MessageBox.Show("Download successful.");
-                        return true;
+                        return Path.Combine(downloadPath, suggestedFileName);
                     }
                     else
                     {
-                        MessageBox.Show($"Error downloading: {response.ReasonPhrase}");
-                        return false;
+                        throw new Exception($"Error downloading: {response.ReasonPhrase}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error downloading: {ex.Message}");
-                return false;
+                throw new Exception($"Error downloading: {ex.Message}");
             }
         }
 

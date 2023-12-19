@@ -1,4 +1,5 @@
-﻿using System;
+﻿using NasInterface.Python;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -8,7 +9,9 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Forms;
+using MessageBox = System.Windows.Forms.MessageBox;
 
 namespace NasInterface
 {
@@ -16,26 +19,34 @@ namespace NasInterface
     {
         private FileManager fileManager;
         private DiskManager diskManager;
+        private PyRunner pyRunner;
         private const string ipAddress = "192.168.63.209";
         private const string port = "5000";
         public Main()
         {
             InitializeComponent();
             Load += Main_Load;
-
         }
         private async void Main_Load(object sender, EventArgs e)
         {
             fileManager = new FileManager();
             diskManager = new DiskManager();
+            pyRunner = new PyRunner();
+
+            pyRunner.ProcessCompleted += async (s, args) =>
+            {
+                if (!string.IsNullOrEmpty(args.Errors))
+                    MessageBox.Show(args.Errors);
+            };
+
             await InitializeAsync();
-            await InitUI();
+            await UpdateDiskSpace();
         }
-        private async Task InitUI()
+        private async Task UpdateDiskSpace()
         {
             await diskManager.GetDiskSpace(ipAddress, port);
 
-            lbDiskSpace.Text = $"{diskManager.UsedSpace} free of {diskManager.TotalSpace}";
+            lbDiskSpace.Text = $"{ diskManager.UsedSpace} free of {diskManager.TotalSpace}";
             double usedSpace = ExtractNumericValue(diskManager.UsedSpace);
             double totalSpace = ExtractNumericValue(diskManager.TotalSpace);
 
@@ -172,9 +183,30 @@ namespace NasInterface
             TreeNode selectedNode = tv_NasFiles.SelectedNode;
             if (selectedNode != null)
             {
-                if (await fileManager.Download(ipAddress, port, selectedNode.FullPath))
-                {// tv_NasFiles.Nodes.Remove(selectedNode);
-                    var a = 1;
+                using (var folderDialog = new FolderBrowserDialog())
+                {
+                    DialogResult result = folderDialog.ShowDialog();
+                    if (result == DialogResult.OK && !string.IsNullOrWhiteSpace(folderDialog.SelectedPath))
+                    {
+                        string downloadPath = folderDialog.SelectedPath;
+
+                        try
+                        {
+                            string downloadedFilePath = await fileManager.DownloadAndReturnPath(ipAddress, port, selectedNode.FullPath, downloadPath);
+                            string decodedFilePath = Path.Combine(downloadPath, Path.GetFileNameWithoutExtension(downloadedFilePath));
+                            await pyRunner.RunAsync(RunnerType.Decoder, decodedFilePath + ".png");
+
+                            MessageBox.Show("Download and decoding successful.");
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show($"Error downloading: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        MessageBox.Show("No folder selected.");
+                    }
                 }
             }
         }
@@ -193,7 +225,10 @@ namespace NasInterface
                     if (openFileDialog.ShowDialog() == DialogResult.OK)
                     {
                         string filePath = openFileDialog.FileName;
-                        if (await fileManager.Upload(ipAddress, port, filePath, selectedNode.FullPath))
+                        string projectDirectory = Directory.GetParent(Directory.GetCurrentDirectory()).Parent.FullName;
+                        string tempFilePath = Path.Combine(projectDirectory, "Temp\\")+ Path.GetFileName(filePath);
+                        await pyRunner.RunAsync(RunnerType.Encoder, @filePath);
+                        if (await fileManager.Upload(ipAddress, port, tempFilePath+".png", selectedNode.FullPath))
                         {
                             string newFileName = Path.GetFileName(filePath)+".png";
                             TreeNode newNode = new TreeNode(newFileName);
@@ -201,6 +236,7 @@ namespace NasInterface
                             newNode.SelectedImageKey = "fileIcon";
                             newNode.Tag = "file";
                             selectedNode.Nodes.Add(newNode);
+                            await UpdateDiskSpace();
                         }
                     }
                 }
